@@ -1,0 +1,143 @@
+---
+description: C toolchain, build system, and directory structure for cat-toto
+globs: ["Makefile", "*.c", "*.h", "src/**/*.c", "include/**/*.h", "tests/**/*.c"]
+alwaysApply: false
+---
+
+# Toolchain & Project Structure
+
+## Language
+
+**C11** (`-std=c11`). **No C++.**
+
+## Compiler flags (from `Makefile`)
+
+```
+-std=c11 -Wall -Wextra -Wpedantic -Werror
+-D_POSIX_C_SOURCE=200809L
+-Iinclude
+-O2          # release
+```
+
+Debug target adds `-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer`.
+
+## Compiler selection
+
+`Makefile` picks **gcc** if available, else **clang**:
+
+```makefile
+CC := $(shell command -v gcc >/dev/null 2>&1 && echo gcc || echo clang)
+```
+
+## Build system
+
+**GNU Make** at repo root. Single link step for the main binary (no separate
+`.o` rules).
+
+| Target | Output |
+|--------|--------|
+| `make` / `all` | `cat-toto` |
+| `make debug` | `cat-toto-debug` |
+| `make test` | builds + runs `tests/test_core` |
+| `make clean` | removes `cat-toto`, `cat-toto-debug`, `tests/test_core` |
+| `make install` | `install -m 755 cat-toto /usr/local/bin` (Linux/macOS; needs sudo) |
+
+**Main sources:**
+`src/main.c`, `src/cat_toto_emit.c`, `src/cat_toto_io.c`,
+`src/cat_toto_format.c`, `src/cat_toto_cli.c`
+
+**Test sources:**
+`tests/test_runner.c`,
+`tests/test_fmt_passthrough.c`,
+`tests/test_fmt_show_ends.c`,
+`tests/test_fmt_show_tabs.c`,
+`tests/test_fmt_number_all.c`,
+`tests/test_fmt_number_nonblank.c`,
+`tests/test_fmt_squeeze_blank.c`,
+`tests/test_fmt_show_nonprinting.c`,
+`tests/test_fmt_show_all.c`,
+`src/cat_toto_format.c`
+
+## Dependencies
+
+**libc only** — no extra `-l` flags. POSIX headers used:
+`unistd.h`, `fcntl.h`, `signal.h`, `sys/stat.h`, `errno.h`, `stdbool.h`,
+`stdio.h` (for `snprintf` in the format engine only; not for I/O).
+
+## Directory layout
+
+```
+cat-toto/
+├── LICENSE.txt              — GNU GPL v2 (full text)
+├── c_version.txt            — C11 / compiler / toolchain documentation
+├── .cursor/rules/
+├── Makefile
+├── README.md
+├── include/
+│   ├── cat_toto.h           — constants, types, exit codes, cat_toto_run()
+│   ├── cat_toto_emit.h
+│   ├── cat_toto_format.h
+│   └── cat_toto_cli.h
+├── src/
+│   ├── main.c
+│   ├── cat_toto_emit.c
+│   ├── cat_toto_io.c
+│   ├── cat_toto_format.c
+│   └── cat_toto_cli.c
+└── tests/
+    ├── test_runner.c
+    ├── test_fmt_passthrough.c / .h
+    ├── test_fmt_show_ends.c / .h
+    ├── test_fmt_show_tabs.c / .h
+    ├── test_fmt_number_all.c / .h
+    ├── test_fmt_number_nonblank.c / .h
+    ├── test_fmt_squeeze_blank.c / .h
+    ├── test_fmt_show_nonprinting.c / .h
+    └── test_fmt_show_all.c / .h
+```
+
+Build artefacts (`cat-toto`, `cat-toto.exe`, `tests/test_core`,
+`tests/test_core.exe`) are gitignored.
+
+## Building on Linux
+
+```sh
+make clean && make && make test
+```
+
+## Building on Windows (MSYS2 UCRT64)
+
+**Recommended:** open **MSYS2 UCRT64** from the Start menu:
+
+```sh
+pacman -S make mingw-w64-ucrt-x86_64-gcc   # once
+cd /path/to/cat-toto
+make clean && make && make test
+```
+
+Produces a **native Windows executable** (`cat-toto` or `cat-toto.exe`).
+Runs in UCRT64, Git Bash, and CMD.
+
+### Git Bash caveat
+
+Git Bash can build if **`/c/msys64/ucrt64/bin` is early on `PATH`** (before
+Anaconda). Otherwise `gcc --version` may work while `cc1` fails silently (DLL
+load order). Prefer UCRT64 shell or:
+
+```bash
+PATH="/c/msys64/ucrt64/bin:$PATH" make
+```
+
+## Linking notes
+
+- `cat_toto_format_chunk()` and `cat_toto_format_state_init()` are defined in
+  `src/cat_toto_format.c` and linked into **both** the main binary and the test
+  binary.
+- Tests link `src/cat_toto_format.c` **directly**; they do **not** link
+  `src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`, or
+  `src/cat_toto_emit.c`.
+- `main()` lives only in `src/main.c`.
+- `snprintf` is used inside `cat_toto_format.c` for line number formatting only;
+  it is **not** used for I/O. All actual I/O goes through `read(2)` /
+  `write(2)`.
+

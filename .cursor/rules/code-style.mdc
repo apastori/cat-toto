@@ -1,0 +1,109 @@
+---
+description: C code style, formatting, naming, and quality rules for cat-toto
+globs: ["src/**/*.c", "include/**/*.h", "tests/**/*.c", "tests/**/*.h", "Makefile"]
+alwaysApply: false
+---
+
+# Code Style & Quality
+
+## Standard & flags
+
+- **C11** (`-std=c11`)
+- `-Wall -Wextra -Wpedantic -Werror`
+- `-D_POSIX_C_SOURCE=200809L`
+- Zero warnings — all treated as errors
+
+## Formatting
+
+- **Indentation:** 4 spaces. No tabs.
+- **Function definitions:** opening brace on its own line.
+- **Line length:** prefer ≤80 characters where practical.
+- **Files end with a single newline.**
+
+## Module conventions
+
+- **`src/main.c`** stays thin — parse CLI flags, build `cat_opts_t`, collect file
+  operands, call `cat_toto_run()`. No I/O, no formatting logic.
+- **`include/cat_toto.h`** — buffer size constants, `cat_opts_t`, `format_state_t`,
+  exit code enum, `cat_toto_run()` declaration. No inline function bodies except
+  trivial predicates.
+- **One concern per `src/cat_toto_*.c`** — do not collapse back into a monolith
+  without reason.
+- **Platform code:** use `#if defined(_WIN32)` / `#else` for OS-specific behaviour
+  (see `install_sigpipe_ignore()` in `cat_toto_cli.c`).
+- **Pass-through vs formatted I/O path** selection lives entirely in
+  `cat_toto_io.c`; byte-level flag transformation lives in `cat_toto_format.c`.
+
+## Naming
+
+| Kind | Style | Examples |
+|------|-------|----------|
+| Functions | `snake_case` | `cat_toto_run`, `process_file`, `cat_toto_format_chunk`, `write_all` |
+| Macros / constants | `UPPER_SNAKE_CASE` | `CAT_TOTO_BUF_SIZE`, `CAT_TOTO_FMT_IN_SIZE`, `CAT_TOTO_FMT_OUT_SIZE` |
+| Headers | `CAT_TOTO_*_H` guards | `CAT_TOTO_H`, `CAT_TOTO_CLI_H` |
+| Struct types | `snake_case` + `_t` suffix | `cat_opts_t`, `format_state_t` |
+
+Public API prefix: **`cat_toto_`** for module entry points.
+
+## Memory
+
+- **Hot loop — pass-through path:** stack only — `char in_buf[CAT_TOTO_BUF_SIZE]`.
+  No heap, no stdio formatting.
+- **Hot loop — formatted path:** stack only —
+  `char in_buf[CAT_TOTO_FMT_IN_SIZE]` + `char out_buf[CAT_TOTO_FMT_OUT_SIZE]`.
+  `CAT_TOTO_FMT_OUT_SIZE` must satisfy the 32:1 expansion guarantee documented in
+  `implementation.mdc`.
+- No `realloc` in-tree.
+
+## Hot loop rules (`cat_toto_io.c`)
+
+- **Pass-through path** (no formatting flags):
+  `read(fd, …)` → `write(STDOUT_FILENO, …)` with partial-write and `EINTR`
+  retry. Zero processing, zero state.
+- **Formatted path** (any flag set):
+  `read(fd, …)` → `cat_toto_format_chunk(…)` → `write(STDOUT_FILENO, …)`.
+- No `printf` / `fprintf` / `puts` / `fputs` / `fwrite` inside either loop.
+- `read()` and `write()` byte counts must **never** be ignored.
+- `EINTR` on `read()` → retry. `EINTR` on `write()` → retry.
+- Write errors are **fatal**: emit error to stderr, `exit(1)`.
+- Read/open errors are **per-file**: emit error, set exit status to 1, continue
+  with the next file operand.
+
+## Errors
+
+- **stderr only:** `cat-toto: <filename>: <strerror(errno)>` for per-file errors;
+  `cat-toto: <context>: <strerror(errno)>` for system errors.
+- Invalid flag: `cat-toto: invalid option -- '<flag>'` on stderr, then `exit(1)`.
+- Implemented in `cat_toto_emit.c`.
+- Never print error messages to stdout.
+
+## Comments
+
+- Chain-of-thought block at top of each `src/*.c` and test file (responsibility,
+  syscalls, heap usage, I/O strategy, C standard).
+- Contract comments on non-trivial functions: preconditions, postconditions,
+  return value, error behaviour.
+- Comment non-obvious decisions (buffer size rationale, 32:1 expansion guarantee,
+  pass-through vs formatted path selection, `-b` overrides `-n` rule).
+
+## Tests
+
+- Plain `assert()` — no external test framework.
+- One scenario per `tests/test_fmt_*.c`; runner in `tests/test_runner.c`.
+- Print `PASS: <name>` on success.
+- Test binaries link `src/cat_toto_format.c` directly; do **not** link
+  `src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`, or
+  `src/cat_toto_emit.c`.
+
+## What not to do
+
+- Do not compile as C++.
+- Do not link libraries beyond libc.
+- Do not use `gets`, unbounded `scanf`, or ignore `read()` / `write()` byte
+  counts.
+- Do not use `fwrite` / `fread` in the hot loop — project standard is raw
+  `read(2)` / `write(2)`.
+- Do not use buffered I/O (`FILE *`) for the main copy path.
+- Do not add flags beyond the documented set without explicit request.
+- Do not combine the pass-through and formatted paths into a single branch.
+

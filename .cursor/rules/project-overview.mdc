@@ -1,0 +1,106 @@
+---
+description: Project identity, purpose, and high-level goals for `cat-toto`
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# cat-toto — Project Overview
+
+## What This Project Is
+
+`cat-toto` is a faithful CLI replica of the GNU Core Utilities `cat`
+(concatenate) command. It reads files sequentially and writes their contents
+to standard output. If no file operands are given, or `-` is used as an
+operand, it reads from standard input.
+
+On a **plain copy** (no flags), output is a raw `read(2)`/`write(2)` loop
+in 64 KiB chunks — maximum throughput with no processing overhead.
+When **any formatting flag** is active, a separate formatted path runs a
+2 KiB read → transform → write loop that handles line numbers, special
+character display, and blank-line squeezing.
+
+## Binary Name
+
+The compiled binary must always be named **`cat-toto`**. Never rename it.
+On Windows, MinGW may also emit `cat-toto.exe`; that is the same program.
+
+## Platforms
+
+| Platform | Build environment | Notes |
+|----------|-------------------|-------|
+| **Linux** | `gcc`/`clang` + GNU Make | Full POSIX path: `sigaction(SIGPIPE, SIG_IGN)`, `open(2)`, `read(2)`, `write(2)` |
+| **Windows** | **MSYS2 UCRT64** (recommended) | Native Windows `.exe`; `install_sigpipe_ignore()` is a no-op under `_WIN32` |
+| **Git Bash** | Works if `/c/msys64/ucrt64/bin` is **before** Anaconda on `PATH` | Same binary as UCRT64; see `toolchain-structure.mdc` |
+
+Binaries are **not portable** across OSes — build separately on Linux and
+on Windows.
+
+## Supported Flags
+
+| Flag | Long form | Meaning |
+|------|-----------|---------|
+| `-n` | `--number` | Number all output lines |
+| `-b` | `--number-nonblank` | Number non-empty lines only (overrides `-n`) |
+| `-E` | `--show-ends` | Show `$` at end of each line |
+| `-T` | `--show-tabs` | Show TAB as `^I` |
+| `-s` | `--squeeze-blank` | Suppress repeated adjacent blank lines |
+| `-v` | `--show-nonprinting` | Show non-printing chars using `^` and `M-` notation |
+| `-A` | `--show-all` | Equivalent to `-vET` |
+| `-e` | *(none)* | Equivalent to `-vE` |
+| `-t` | *(none)* | Equivalent to `-vT` |
+| `-u` | *(none)* | Ignored (POSIX unbuffered output) |
+| | `--help` | Print help and exit 0 |
+| | `--version` | Print version and exit 0 |
+
+**Do not add:**
+
+- Interactive or TUI modes
+- Input from stdin used as flag data (only as file content)
+- Logging or debug output in normal operation
+- Flags not listed in the table above
+- Any feature that would break GNU `cat` behavioural compatibility
+
+## Behavioural Contract
+
+| Invocation | Behaviour |
+|---|---|
+| `cat-toto file.txt` | Writes `file.txt` to stdout |
+| `cat-toto f1.txt f2.txt` | Concatenates and writes both files in order |
+| `cat-toto` | Reads from stdin until EOF (Ctrl+D) |
+| `cat-toto -` | Explicit stdin operand; same as above |
+| `cat-toto f1.txt - f2.txt` | Writes f1, then stdin, then f2 |
+| `cat-toto -n file.txt` | Writes with all lines numbered from 1 |
+| `cat-toto -b file.txt` | Numbers non-blank lines only |
+| `cat-toto -E file.txt` | Appends `$` before each newline |
+| `cat-toto -T file.txt` | Shows TAB characters as `^I` |
+| `cat-toto -s file.txt` | Collapses runs of blank lines to one |
+| `cat-toto -v file.txt` | Shows non-printing chars as `^X` / `M-X` |
+| `cat-toto -A file.txt` | Equivalent to `-v -E -T` |
+| `cat-toto --version` | Prints `cat-toto <version>`, exits 0 |
+| `cat-toto --help` | Prints usage on stdout, exits 0 |
+| `cat-toto nonexistent.txt` | Prints error to stderr, exits 1 |
+| `cat-toto f1.txt bad.txt f2.txt` | Writes f1, emits error for bad, writes f2, exits 1 |
+| `cat-toto file.txt \| head -n5` | Writes 5 lines then exits 0 on broken pipe |
+
+Line numbers are **continuous across multiple file operands** (GNU `cat`
+behaviour): the counter does not reset between files.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | All files processed successfully; `--help`; `--version`; broken pipe (`EPIPE` on `write`) |
+| `1` | Any error: file not found, permission denied, write failure, bad flag, signal setup failure |
+| `130` | Ctrl+C / `SIGINT` (`128 + 2`) |
+
+## Project Layout (summary)
+
+```
+include/   — cat_toto.h + cat_toto_{emit,format,cli}.h
+src/       — main.c + cat_toto_{emit,io,format,cli}.c
+tests/     — test_runner.c + test_fmt_*.c / .h → binary tests/test_core
+```
+
+See `implementation.mdc`, `toolchain-structure.mdc`, and `testing.mdc` for
+detail.
+

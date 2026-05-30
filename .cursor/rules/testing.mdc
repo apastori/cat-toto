@@ -1,0 +1,120 @@
+---
+description: Unit test layout and conventions for cat-toto (format engine)
+globs: ["tests/**/*.c", "tests/**/*.h", "Makefile"]
+alwaysApply: false
+---
+
+# Testing — cat-toto
+
+## Scope
+
+The Makefile `test` target builds and runs **`tests/test_core`**
+(or `tests/test_core.exe` on Windows).
+
+Tests cover **`cat_toto_format_chunk()`** only (the formatted output path).
+There are **no** subprocess or integration tests in-tree; file open/read I/O,
+SIGPIPE handling, stdin reading, and multi-file concatenation are not
+unit-tested here.
+
+## Layout
+
+| File | Role |
+|------|------|
+| `tests/test_runner.c` | `main()` — invokes all suites in fixed order |
+| `tests/test_fmt_passthrough.c` / `.h` | No flags: output bytes are identical to input bytes; state tracks `at_bol` only |
+| `tests/test_fmt_show_ends.c` / `.h` | `-E`: each `\n` in output is preceded by `$`; non-newline bytes unchanged |
+| `tests/test_fmt_show_tabs.c` / `.h` | `-T`: `\t` becomes `^I`; other bytes pass through |
+| `tests/test_fmt_number_all.c` / `.h` | `-n`: every line is numbered from 1 using `"%6ld\t"` format |
+| `tests/test_fmt_number_nonblank.c` / `.h` | `-b`: blank lines receive no number; counter skips them; `-b` flag overrides `-n` when both are set |
+| `tests/test_fmt_squeeze_blank.c` / `.h` | `-s`: a run of two or more consecutive blank lines is reduced to exactly one blank line |
+| `tests/test_fmt_show_nonprinting.c` / `.h` | `-v`: control chars rendered as `^X`; high bytes rendered as `M-X` or `M-^X`; `\t` and `\n` unaffected |
+| `tests/test_fmt_show_all.c` / `.h` | `-A` (= `-vET`): all three transformations applied in combination |
+
+One scenario per `.c` / `.h` pair. Headers declare the test function for
+`test_runner.c`.
+
+## Framework
+
+- No external framework — plain C with `<assert.h>`.
+- Each case prints `PASS: <descriptive name>` on success.
+- `assert()` failure → `abort()` → non-zero exit from `make test`.
+
+## Build (from `Makefile`)
+
+```makefile
+tests/test_core: $(TEST_SRCS) src/cat_toto_format.c $(HDRS) $(wildcard tests/*.h)
+	$(CC) $(CFLAGS) -o $@ $(TEST_SRCS) src/cat_toto_format.c
+```
+
+Tests link **only** `src/cat_toto_format.c`. They do **not** link
+`src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`, or
+`src/cat_toto_emit.c`.
+
+`cat_toto_format_chunk()` and `cat_toto_format_state_init()` are reached via
+`#include "cat_toto_format.h"` plus the direct link of
+`src/cat_toto_format.c`.
+
+## Required cases (behaviour)
+
+1. **Passthrough:** all `cat_opts_t` fields false; output buffer equals input
+   buffer byte-for-byte; `state->at_bol` is true after a trailing `\n` and
+   false otherwise.
+
+2. **Show ends:** input `"hello\nworld\n"` → output `"hello$\nworld$\n"`.
+   Input with no trailing newline: the final content byte is unchanged (no
+   spurious `$`).
+
+3. **Show tabs:** input `"a\tb\tc"` → output `"a^Ib^Ic"`.
+   Non-tab bytes are unaffected; `\n` is unaffected.
+
+4. **Number all:** three-line input → each line's first byte is preceded by
+   `"     1\t"`, `"     2\t"`, `"     3\t"` (6-digit right-justified field
+   + tab). Line counter increments on every `\n`.
+
+5. **Number nonblank:** input containing a blank line (`\n\n`) → the blank
+   line has no number prefix; the non-blank lines are numbered consecutively.
+   Verify that setting both `number_nonblank = true` and `number_all = true`
+   behaves as `-b` (blank lines unnumbered), confirming `-b` overrides `-n`.
+
+6. **Squeeze blank:** input `"a\n\n\nb\n"` (line `a`, two blank lines, line
+   `b`) → output `"a\n\nb\n"` (only one blank line retained). Verify that
+   three or more consecutive blank lines are all reduced to one.
+
+7. **Show nonprinting:** exercise at least four cases —
+   `\x01` → `"^A"`, `\x7f` → `"^?"`, `\x81` → `"M-^A"`, `\xfe` → `"M-~"`.
+   Verify `\t` and `\n` pass through unchanged when `-T` and `-E` are off.
+
+8. **Show all (`-A`):** input containing `\t`, `\n`, and a non-printing byte
+   → `\t` → `"^I"`, `\n` → `"$\n"`, non-printing byte → `M-X` / `^X`
+   notation. All three transformations are active simultaneously.
+
+## Adding tests
+
+- Add `tests/test_fmt_<name>.c` + `.h`, declare the runner function in the
+  `.h`, call it from `test_runner.c`, and append to `TEST_SRCS` in
+  `Makefile` (the `src/cat_toto_format.c` dependency is already present).
+- Keep tests allocation-free; stack buffers only.
+- Always call `cat_toto_format_state_init()` to obtain a fresh `format_state_t`
+  before each individual test case.
+
+## Manual smoke tests (not automated)
+
+After `make`:
+
+```sh
+./cat-toto --version
+./cat-toto --help
+./cat-toto /etc/hostname                      # basic file output
+./cat-toto -n /etc/hostname                   # all lines numbered
+./cat-toto -b /etc/hostname                   # non-blank lines numbered
+./cat-toto -A /etc/hostname                   # show-all: ^I, $, M-X
+./cat-toto -s /etc/hostname                   # squeeze blank lines
+./cat-toto /etc/hostname /etc/hostname        # concatenation; continuous line numbers
+./cat-toto nonexistent.txt                    # expect exit 1, error on stderr
+./cat-toto nonexistent.txt /etc/hostname      # error then continues; exit 1
+./cat-toto - < /etc/hostname                  # explicit stdin operand
+echo "hello" | ./cat-toto                     # stdin via pipe
+./cat-toto /etc/hostname | head -n 1          # broken pipe → exit 0, no stderr
+# Interactive: ./cat-toto then Ctrl+C — expect exit 130
+```
+

@@ -1,0 +1,300 @@
+---
+description: Canonical C11 implementation for cat-toto — module layout, I/O paths, flag handling, buffer policy, format engine, and exit behaviour
+globs: ["src/**/*.c", "include/**/*.h"]
+alwaysApply: false
+---
+
+# cat-toto — Implementation (C11)
+
+## Module layout
+
+| Path | Role |
+|------|------|
+| `include/cat_toto.h` | `CAT_TOTO_BUF_SIZE` (65536), `CAT_TOTO_FMT_IN_SIZE` (2048), `CAT_TOTO_FMT_OUT_SIZE` (65536), `CAT_TOTO_VERSION_STRING`, `CAT_TOTO_EXIT_*` enum, `cat_opts_t`, `format_state_t`, `cat_toto_run()` declaration |
+| `include/cat_toto_emit.h` | `cat_toto_emit_error()`, `cat_toto_emit_bad_flag()` |
+| `include/cat_toto_format.h` | `cat_toto_format_chunk()`, `cat_toto_format_state_init()` |
+| `include/cat_toto_cli.h` | `parse_flags()`, `print_help()`, `print_version()`, `install_sigpipe_ignore()`, `install_sigint_handler()`, `cat_toto_exit_if_stop_requested()` |
+| `src/main.c` | `main()` only — dispatch help/version, parse flags, collect operands, call `cat_toto_run()` |
+| `src/cat_toto_emit.c` | stderr diagnostics: `cat-toto: <context>: <strerror(errno)>` |
+| `src/cat_toto_io.c` | `cat_toto_run()`, static `process_file()`, static `write_all()`; pass-through and formatted read/write loops |
+| `src/cat_toto_format.c` | `cat_toto_format_chunk()`, `cat_toto_format_state_init()`; all per-byte flag expansion logic |
+| `src/cat_toto_cli.c` | Flag parsing, help/version text, SIGPIPE/SIGINT setup |
+
+Each `.c` file opens with a **chain-of-thought comment block** (responsibility,
+syscalls, heap usage, I/O strategy, C standard). Preserve that pattern when
+adding files.
+
+## C standard
+
+**ISO C11** (`-std=c11`), `-D_POSIX_C_SOURCE=200809L` for POSIX.1-2008
+(`open`, `read`, `write`, `close`, `sigaction`, etc.).
+MinGW builds define `_WIN32`; signal setup is guarded there.
+
+## Core types (`include/cat_toto.h`)
+
+### `cat_opts_t`
+
+```c
+typedef struct {
+    bool number_all;       /* -n / --number */
+    bool number_nonblank;  /* -b / --number-nonblank (overrides number_all) */
+    bool show_ends;        /* -E / --show-ends */
+    bool show_tabs;        /* -T / --show-tabs */
+    bool squeeze_blank;    /* -s / --squeeze-blank */
+    bool show_nonprinting; /* -v / --show-nonprinting */
+} cat_opts_t;
+```
+
+Composite flags are **resolved during parsing** in `parse_flags()` — they are
+never stored as separate fields:
+
+| Input flag | Fields set |
+|------------|------------|
+| `-A` / `--show-all` | `show_nonprinting`, `show_ends`, `show_tabs` |
+| `-e` | `show_nonprinting`, `show_ends` |
+| `-t` | `show_nonprinting`, `show_tabs` |
+| `-u` | (none — silently ignored; POSIX compatibility) |
+
+### `format_state_t`
+
+```c
+typedef struct {
+    long line_num;   /* next line number to print (1-based) */
+    bool at_bol;     /* true when the next byte begins a new line */
+    int  blank_run;  /* consecutive blank lines seen so far (-s) */
+} format_state_t;
+```
+
+`cat_toto_format_state_init()` sets `line_num = 1`, `at_bol = true`,
+`blank_run = 0`.
+
+**State persists across files** — line numbering is continuous across all
+operands (GNU `cat` behaviour).
+
+## Buffer constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `CAT_TOTO_BUF_SIZE` | 65536 | Pass-through read buffer (64 KiB) |
+| `CAT_TOTO_FMT_IN_SIZE` | 2048 | Formatted-path read buffer |
+| `CAT_TOTO_FMT_OUT_SIZE` | 65536 | Formatted-path output buffer |
+
+### Expansion guarantee
+
+`CAT_TOTO_FMT_OUT_SIZE / CAT_TOTO_FMT_IN_SIZE = 32` (safety factor).
+
+Worst-case output per input byte — all flags active, LLONG_MAX line number:
+- `\n` at BOL with `-n -E`:
+  `"%6ld\t"` up to 20 chars (19 digits + tab) + `$` + `\n` = **22 bytes per 1 input byte**
+- Non-printing char at BOL with `-n -v`:
+  20 chars (line number) + `M-^X` = **24 bytes per 1 input byte**,
+  but this byte must be followed by a `\n` (2 input bytes total for 1 BOL byte)
+  → effective ratio ≤ 13 per input byte in practice
+
+Bounding calculation: `2048 × 22 = 45056 ≤ 65536`. ✓
+
+Do **not** increase `CAT_TOTO_FMT_IN_SIZE` above `CAT_TOTO_FMT_OUT_SIZE / 32`
+without re-validating the worst-case expansion.
+
+## I/O path selection (`cat_toto_io.c`)
+
+```
+needs_format(opts) == false  →  pass-through path  (CAT_TOTO_BUF_SIZE)
+needs_format(opts) == true   →  formatted path     (CAT_TOTO_FMT_IN_SIZE → format → write)
+```
+
+`needs_format()` returns true if **any** field of `cat_opts_t` is true.
+Both paths call the same `write_all()` helper for writes.
+
+## Pass-through path (`process_file`, no flags)
+
+```
+loop:
+  n = read(fd, in_buf, CAT_TOTO_BUF_SIZE)
+  if n == 0: break   /* EOF */
+  if n < 0:
+    if errno == EINTR: retry
+    else: cat_toto_emit_error(filename); *exit_status = 1; return
+  cat_toto_exit_if_stop_requested()
+  write_all(STDOUT_FILENO, in_buf, (size_t)n)   /* fatal on error */
+```
+
+No processing, no state. Maximum throughput; matches `cp`-style raw I/O.
+
+## Formatted path (`process_file`, any flag set)
+
+```
+loop:
+  n = read(fd, in_buf, CAT_TOTO_FMT_IN_SIZE)
+  if n == 0: break   /* EOF */
+  if n < 0:
+    if errno == EINTR: retry
+    else: cat_toto_emit_error(filename); *exit_status = 1; return
+  cat_toto_exit_if_stop_requested()
+  m = cat_toto_format_chunk(in_buf, (size_t)n,
+                            out_buf, CAT_TOTO_FMT_OUT_SIZE,
+                            opts, state)
+  write_all(STDOUT_FILENO, out_buf, m)           /* fatal on error */
+```
+
+## `cat_toto_format_chunk()` contract
+
+Declared in `include/cat_toto_format.h`, defined in `src/cat_toto_format.c`.
+
+```c
+size_t cat_toto_format_chunk(
+    const char *in_buf,  size_t in_len,
+    char       *out_buf, size_t out_cap,
+    const cat_opts_t    *opts,
+    format_state_t      *state);
+```
+
+- **Preconditions:** `in_len > 0`, `out_cap >= in_len * 32`, `opts != NULL`,
+  `state != NULL`
+- **Postcondition:** `state` updated; return value is bytes placed in `out_buf`
+- **Return:** number of bytes written to `out_buf` (always `<= out_cap`)
+- **Side effects:** updates `state->line_num`, `state->at_bol`,
+  `state->blank_run`
+
+### Per-byte processing rules (applied in this order)
+
+1. **`-s` (squeeze_blank):** if `state->at_bol == true` and current byte is
+   `\n` (blank line detected):
+   - Increment `state->blank_run`.
+   - If `state->blank_run > 1`: **discard** this `\n`; do not advance to steps
+     2–6; leave `at_bol` true.
+   - If `state->blank_run == 1`: allow through (first blank line in run).
+
+2. **`-n` / `-b` line number at BOL:** if `state->at_bol == true` and the byte
+   was not discarded by step 1:
+   - If `-b` (`number_nonblank`): emit line number only if current byte is NOT
+     `\n`.
+   - If `-n` (`number_all`) and not `-b`: emit line number unconditionally.
+   - Format: `"%6ld\t"` (`snprintf` into the output buffer; not `fprintf`).
+   - Increment `state->line_num` after emission.
+
+3. **`-v` (show_nonprinting):** transform non-printing bytes (see table below);
+   skip `\t` (handled by step 4) and `\n` (handled by step 5).
+
+4. **`-T` (show_tabs):** if byte is `\t`, emit `^I` (2 bytes) instead.
+
+5. **`-E` (show_ends):** if byte is `\n`, emit `$` (1 byte) before it.
+
+6. Emit the (possibly transformed) byte(s); update `state->at_bol`
+   (set `true` whenever a `\n` is written to the output).
+
+When a byte is not discarded by step 1 and is a non-blank char, reset
+`state->blank_run = 0`.
+
+### `show_nonprinting` (`-v`) byte expansion table
+
+| Input range | Output notation | Example |
+|-------------|-----------------|---------|
+| 0x00–0x08, 0x0B–0x0C, 0x0E–0x1F | `^X` where X = byte + 0x40 | `0x01` → `^A` |
+| 0x09 (`\t`) | pass through (step 4 handles if `-T` set) | |
+| 0x0A (`\n`) | pass through (step 5 inserts `$` if `-E` set) | |
+| 0x7F | `^?` | |
+| 0x80–0x9F | `M-^X` where X = (byte − 0x80) + 0x40 | `0x81` → `M-^A` |
+| 0xA0–0xFE | `M-X` where X = byte − 0x80 | `0xA0` → `M- ` |
+| 0xFF | `M-^?` | |
+| 0x20–0x7E (printable ASCII) | pass through | |
+
+`-T` (step 4) takes priority over `-v` (step 3) for `\t`.
+`-E` (step 5) inserts `$` but does **not** suppress the `\n`.
+
+## `cat_toto_run()` (`src/cat_toto_io.c`)
+
+```
+int exit_status = 0;
+format_state_t state;
+cat_toto_format_state_init(&state);
+
+if (no file operands OR sole operand is "-"):
+    process_file(STDIN_FILENO, "(stdin)", opts, &state, &exit_status)
+else:
+    for each operand:
+        if operand == "-":
+            process_file(STDIN_FILENO, "(stdin)", opts, &state, &exit_status)
+        else:
+            fd = open(operand, O_RDONLY)
+            if fd < 0:
+                cat_toto_emit_error(operand); exit_status = 1; continue
+            process_file(fd, operand, opts, &state, &exit_status)
+            close(fd)
+
+return exit_status
+```
+
+`cat_toto_run()` returns 0 or 1; `main()` calls `exit()` with that value.
+`write_all()` errors inside `process_file()` call `exit()` directly and do not
+return to the caller.
+
+## `write_all()` (`src/cat_toto_io.c`, static)
+
+Partial-write retry loop: retry on `EINTR`; on `EPIPE` call
+`fflush(stdout)` (ignore return) then `exit(CAT_TOTO_EXIT_OK)`; on other write
+errors call `cat_toto_emit_error("write")` then `exit(CAT_TOTO_EXIT_ERR)`.
+Same contract as `yes-toto`'s `try_write_all()`.
+
+## SIGPIPE / EPIPE
+
+| Platform | `install_sigpipe_ignore()` | Broken pipe |
+|----------|----------------------------|-------------|
+| **Linux / POSIX** | `sigaction(SIGPIPE, SIG_IGN, NULL)` | `write()` → `errno == EPIPE` |
+| **Windows (`_WIN32`)** | No-op (returns 0) | CRT may set `EPIPE` or `EINVAL`; `maybe_normalize_broken_pipe_errno()` in `write_all()` remaps `EINVAL` on pipe fds to `EPIPE` |
+
+## SIGINT / Ctrl+C
+
+Same flag-based approach as `yes-toto`:
+
+| Platform | Setup | Exit |
+|----------|-------|------|
+| **Linux / POSIX** | `sigaction(SIGINT, …)` sets `cat_toto_stop_requested` | `_exit(130)` via `cat_toto_exit_if_stop_requested()` |
+| **Windows (`_WIN32`)** | `signal(SIGINT, …)` only — **no** `SetConsoleCtrlHandler` | `_exit(130)` from main thread |
+
+Handlers **must not** call `_exit` directly. Flag + main-thread exit only.
+
+## Exit codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| `0` | `CAT_TOTO_EXIT_OK` | All files processed successfully; `--help`; `--version`; broken pipe (`EPIPE`) |
+| `1` | `CAT_TOTO_EXIT_ERR` | Any file open/read error, write error, bad flag, or signal setup failure |
+| `130` | `CAT_TOTO_EXIT_SIGINT` | Ctrl+C / `SIGINT` (`128 + 2`) |
+
+## Error messages
+
+All diagnostics on **stderr**, one line:
+
+- Per-file: `cat-toto: <filename>: <strerror(errno)>`
+- System: `cat-toto: <context>: <strerror(errno)>`
+- Bad flag: `cat-toto: invalid option -- '<flag>'`
+
+**Per-file open/read errors:** emit message, set `exit_status = 1`, **continue**
+with remaining operands.
+**Write errors:** emit message, **exit 1** immediately — no continuation.
+**Bad flag:** emit message, **exit 1** immediately — before any I/O.
+
+## Flag parsing (`src/cat_toto_cli.c`)
+
+1. Scan `argv[1…]` left to right.
+2. `--` → stop flag parsing; all remaining tokens are file operands.
+3. `--help` → `print_help()` + `exit(0)` (**wins** over all other flags).
+4. `--version` → `print_version()` + `exit(0)`.
+5. Long forms `--number`, `--number-nonblank`, `--show-all`, `--show-ends`,
+   `--show-tabs`, `--show-nonprinting`, `--squeeze-blank` → set corresponding
+   `cat_opts_t` fields.
+6. Short options: standard POSIX cluster parsing for `-n`, `-b`, `-E`, `-T`,
+   `-s`, `-v`, `-A`, `-e`, `-t`, `-u` (e.g. `-nE`, `-Abs`).
+7. Unknown flag → `cat_toto_emit_bad_flag(flag)` + `exit(1)`.
+
+`-` alone (not as a flag character) is a valid file operand meaning stdin.
+File operands may be freely mixed with flags (e.g. `cat-toto -n file.txt -`).
+
+## Line number format
+
+`"%6ld\t"` — matches GNU `cat -n`: right-justified in a minimum 6-character
+field followed by a hard tab. The `%6ld` minimum-width specifier means numbers
+wider than 6 digits overflow naturally (e.g. `"1000000\t"`). `line_num` is a
+`long`; do not use `int`.
+
