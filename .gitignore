@@ -19,6 +19,9 @@
 *.exe
 *.out
 *.app
+cat-toto
+cat-toto-debug
+tests/test_core
 
 # Debug files
 *.dSYM/
