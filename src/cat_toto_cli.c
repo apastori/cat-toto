@@ -29,87 +29,103 @@ static void handle_sigint(int signo)
 static void apply_short_flag(char flag, cat_opts_t *opts)
 {
     switch (flag) {
-    case 'n':
-        opts->number_all = true;
-        break;
-    case 'b':
-        opts->number_nonblank = true;
-        break;
-    case 'E':
-        opts->show_ends = true;
-        break;
-    case 'T':
-        opts->show_tabs = true;
-        break;
-    case 's':
-        opts->squeeze_blank = true;
-        break;
-    case 'v':
-        opts->show_nonprinting = true;
-        break;
-    case 'A':
-        opts->show_nonprinting = true;
-        opts->show_ends = true;
-        opts->show_tabs = true;
-        break;
-    case 'e':
-        opts->show_nonprinting = true;
-        opts->show_ends = true;
-        break;
-    case 't':
-        opts->show_nonprinting = true;
-        opts->show_tabs = true;
-        break;
-    case 'u':
-        break;
-    default:
-        cat_toto_emit_bad_flag(flag);
-        exit(CAT_TOTO_EXIT_ERR);
+        case 'n':
+            opts->number_all = true;
+            break;
+        case 'b':
+            opts->number_nonblank = true;
+            break;
+        case 'E':
+            opts->show_ends = true;
+            break;
+        case 'T':
+            opts->show_tabs = true;
+            break;
+        case 's':
+            opts->squeeze_blank = true;
+            break;
+        case 'v':
+            opts->show_nonprinting = true;
+            break;
+        case 'A':
+            opts->show_nonprinting = true;
+            opts->show_ends = true;
+            opts->show_tabs = true;
+            break;
+        case 'e':
+            opts->show_nonprinting = true;
+            opts->show_ends = true;
+            break;
+        case 't':
+            opts->show_nonprinting = true;
+            opts->show_tabs = true;
+            break;
+        case 'u':
+            break;
+        default: {
+            char flag_str[2] = { flag, '\0' };
+            cat_toto_emit_bad_flag(flag_str);
+            exit(CAT_TOTO_EXIT_ERR);
+        }
     }
 }
 
-static void apply_long_flag(const char *arg, cat_opts_t *opts)
+static void apply_long_flag(const char *option, cat_opts_t *opts)
 {
+    const char *arg = option;
+
+    if (strncmp(option, "--", 2) == 0) {
+        arg = option + 2;
+    }
+
     if (strcmp(arg, "help") == 0) {
         print_help();
         exit(CAT_TOTO_EXIT_OK);
     }
+
     if (strcmp(arg, "version") == 0) {
         print_version();
         exit(CAT_TOTO_EXIT_OK);
     }
+
     if (strcmp(arg, "number") == 0) {
         opts->number_all = true;
         return;
     }
+
     if (strcmp(arg, "number-nonblank") == 0) {
         opts->number_nonblank = true;
         return;
     }
+
     if (strcmp(arg, "show-all") == 0) {
         opts->show_nonprinting = true;
         opts->show_ends = true;
         opts->show_tabs = true;
         return;
     }
+
     if (strcmp(arg, "show-ends") == 0) {
         opts->show_ends = true;
         return;
     }
+
     if (strcmp(arg, "show-tabs") == 0) {
         opts->show_tabs = true;
         return;
     }
+
     if (strcmp(arg, "show-nonprinting") == 0) {
         opts->show_nonprinting = true;
         return;
     }
+    
     if (strcmp(arg, "squeeze-blank") == 0) {
         opts->squeeze_blank = true;
         return;
     }
 
-    cat_toto_emit_bad_flag('-');
+    cat_toto_emit_bad_flag(option);
     exit(CAT_TOTO_EXIT_ERR);
 }
 
@@ -178,22 +194,27 @@ void parse_flags(int argc, char **argv, cat_opts_t *opts, int *first_operand_ind
     for (i = 1; i < argc; i++) {
         const char *arg = argv[i];
 
+        /* If the argument is --, then we have reached the end of the flags */
         if (strcmp(arg, "--") == 0) {
             *first_operand_index = i + 1;
             return;
         }
 
+        /* If the argument starts with -, then it is a flag */
         if (arg[0] == '-' && arg[1] != '\0') {
+            /* If the argument is --, then we have reached the end of the flags */
             if (arg[1] == '-' && arg[2] == '\0') {
                 *first_operand_index = i + 1;
                 return;
             }
 
+            /* If the argument is a long flag */
             if (arg[1] == '-' && arg[2] != '\0') {
-                apply_long_flag(arg + 2, opts);
+                apply_long_flag(arg, opts);
                 continue;
             }
 
+            /* Iterates over the short flags */
             for (int j = 1; arg[j] != '\0'; j++) {
                 apply_short_flag(arg[j], opts);
             }
@@ -203,7 +224,7 @@ void parse_flags(int argc, char **argv, cat_opts_t *opts, int *first_operand_ind
         *first_operand_index = i;
         return;
     }
-
+    /* If the argument is not a flag, then it is a file operand */
     *first_operand_index = argc;
 }
 
