@@ -18,16 +18,16 @@
 void cat_toto_emit_error(const char *context)
 {
     char buf[512];
-    int n;
+    int num_bytes_written;
 
-    n = snprintf(
+    num_bytes_written = snprintf(
         buf,
         sizeof(buf),
         "cat-toto: %s: %s\n",
         context,
         strerror(errno));
-    if (n > 0) {
-        (void)write(STDERR_FILENO, buf, (size_t)n);
+    if (num_bytes_written > 0) {
+        (void)write(STDERR_FILENO, buf, (size_t)num_bytes_written);
     }
 }
 
