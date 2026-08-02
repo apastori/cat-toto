@@ -1,0 +1,25 @@
+cat-toto — C language and toolchain notes
+=========================================
+
+Language standard
+-----------------
+ISO C11 (`-std=c11`), with POSIX.1-2008 features enabled via
+`-D_POSIX_C_SOURCE=200809L`.
+
+Compiler
+--------
+GNU Make selects `gcc` when available, otherwise `clang`. Release builds use
+`-O2`; the `debug` target adds AddressSanitizer and UndefinedBehaviorSanitizer.
+
+Platforms
+---------
+- Linux: native `gcc`/`clang` + GNU Make
+- Windows: MSYS2 UCRT64 with `mingw-w64-ucrt-x86_64-gcc` (recommended)
+
+Dependencies
+------------
+libc only. No third-party libraries.
+
+Warnings
+--------
+All builds use `-Wall -Wextra -Wpedantic -Werror` (warnings are errors).
