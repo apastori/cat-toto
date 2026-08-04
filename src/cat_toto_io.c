@@ -62,9 +62,9 @@ static void write_all(int fd, const void *buf, size_t len)
     size_t remaining = len;
 
     while (remaining > 0U) {
-        ssize_t n = write(fd, p, remaining);
+        ssize_t num_bytes_written = write(fd, p, remaining);
 
-        if (n < 0) {
+        if (num_bytes_written < 0) {
             if (errno == EINTR) {
                 continue;
             }
@@ -80,13 +80,13 @@ static void write_all(int fd, const void *buf, size_t len)
             exit(CAT_TOTO_EXIT_ERR);
         }
 
-        if (n == 0) {
+        if (num_bytes_written == 0) {
             cat_toto_emit_error("write");
             exit(CAT_TOTO_EXIT_ERR);
         }
 
-        p += (size_t)n;
-        remaining -= (size_t)n;
+        p += (size_t)num_bytes_written;
+        remaining -= (size_t)num_bytes_written;
     }
 }
 
@@ -97,6 +97,7 @@ static void process_file_passthrough(
 {
     char in_buf[CAT_TOTO_BUF_SIZE];
 
+    /* Infinite loop the same as while(true) { ... } */
     for (;;) {
         ssize_t num_bytes_read = read(fd, in_buf, sizeof(in_buf));
 
@@ -128,6 +129,7 @@ static void process_file_formatted(
     char in_buf[CAT_TOTO_FMT_IN_SIZE];
     char out_buf[CAT_TOTO_FMT_OUT_SIZE];
 
+    /* Infinite loop the same as while(true) { ... } */
     for (;;) {
         ssize_t num_bytes_read = read(fd, in_buf, sizeof(in_buf));
 
