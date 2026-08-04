@@ -31,7 +31,7 @@ cd /path/to/cat-toto
 make clean && make
 ```
 
-If using Git Bash, put `/c/msys64/ucrt64/bin` before Anaconda on `PATH`, or:
+If using Git Bash:
 
 ```sh
 PATH="/c/msys64/ucrt64/bin:$PATH" make
