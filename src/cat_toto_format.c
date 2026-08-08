@@ -181,9 +181,13 @@ size_t cat_toto_format_chunk(
         /* if show_nonprinting is true and c is not a newline or tab, emit the nonprinting character */
         int should_emit_nonprinting = show_nonprinting && c != '\n' && c != '\t';
         if (!should_emit_tab && should_emit_nonprinting) {
+            /*  0x20U is equivalent to 32 in decimal, 0x7FU is equivalent to 127 in decimal, 0x80U is equivalent to 128 in decimal */
+            /* less than 32 matches ASCII Control Codes, 127 matches DEL control code, greater or equal than 128 matches extended ASCII */
+            /* all this characters are non-printing */
             if (c < 0x20U || c == 0x7FU || c >= 0x80U) {
                 pos = emit_show_nonprinting(out_buf, out_cap, pos, c);
             } 
+            /* if c is printable ASCII byte/character, emit it */
             if (c >= 0x20U && c != 0x7FU && c < 0x80U) {
                 pos = emit_char(out_buf, out_cap, pos, c);
             }
