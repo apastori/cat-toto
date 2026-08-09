@@ -19,6 +19,8 @@ Keep `README.md` user-focused. Align with `project-overview.mdc` and
 
 2. **Build**
    - `make`, `make debug`, `make test`, `make clean`, optional `make install`
+   - Artefacts under `build/` (`build/cat-toto`, `build/cat-toto-debug`,
+     `build/tests/test_core`)
    - **Linux:** `make clean && make`
    - **Windows:** MSYS2 **UCRT64** terminal;
      `pacman -S make mingw-w64-ucrt-x86_64-gcc`; note Git Bash needs UCRT
@@ -49,7 +51,9 @@ Keep `README.md` user-focused. Align with `project-overview.mdc` and
    `c_version.txt`):
    - `include/cat_toto.h` + `cat_toto_{emit,format,cli}.h`
    - `src/main.c` + `cat_toto_{emit,io,format,cli}.c`
-   - `tests/test_runner.c` + `test_fmt_*.c` → `tests/test_core`
+   - `tests/test_runner.c` + `test_fmt_*.c` → binary `build/tests/test_core`
+   - `build/` — object/binary output; dirs kept via `.gitkeep`, artefacts
+     gitignored
 
 ## Do not document in README
 

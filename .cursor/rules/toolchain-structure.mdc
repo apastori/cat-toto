@@ -31,23 +31,21 @@ CC := $(shell command -v gcc >/dev/null 2>&1 && echo gcc || echo clang)
 
 ## Build system
 
-**GNU Make** at repo root. Single link step for the main binary (no separate
-`.o` rules).
+**GNU Make** at repo root. Separate compile (`.o`) and link steps. All artefacts
+under **`build/`**.
 
 | Target | Output |
 |--------|--------|
-| `make` / `all` | `cat-toto` |
-| `make debug` | `cat-toto-debug` |
-| `make test` | builds + runs `tests/test_core` |
-| `make clean` | removes `cat-toto`, `cat-toto-debug`, `tests/test_core` |
-| `make install` | `install -m 755 cat-toto /usr/local/bin` (Linux/macOS; needs sudo) |
+| `make` / `all` | `build/cat-toto` |
+| `make debug` | `build/cat-toto-debug` |
+| `make test` | builds + runs `build/tests/test_core` |
+| `make clean` | removes objects/binaries under `build/`; keeps `.gitkeep` |
+| `make install` | `install -m 755 build/cat-toto /usr/local/bin` (Linux/macOS; needs sudo) |
 
-**Main sources:**
-`src/main.c`, `src/cat_toto_emit.c`, `src/cat_toto_io.c`,
-`src/cat_toto_format.c`, `src/cat_toto_cli.c`
+**Main sources:** `src/main.c`, `src/cat_toto_emit.c`, `src/cat_toto_io.c`,
+`src/cat_toto_format.c`, `src/cat_toto_cli.c` → objects `build/*.o`
 
-**Test sources:**
-`tests/test_runner.c`,
+**Test sources:** `tests/test_runner.c`,
 `tests/test_fmt_passthrough.c`,
 `tests/test_fmt_show_ends.c`,
 `tests/test_fmt_show_tabs.c`,
@@ -55,8 +53,7 @@ CC := $(shell command -v gcc >/dev/null 2>&1 && echo gcc || echo clang)
 `tests/test_fmt_number_nonblank.c`,
 `tests/test_fmt_squeeze_blank.c`,
 `tests/test_fmt_show_nonprinting.c`,
-`tests/test_fmt_show_all.c`,
-`src/cat_toto_format.c`
+`tests/test_fmt_show_all.c` → objects `build/tests/*.o`
 
 ## Dependencies
 
@@ -84,25 +81,36 @@ cat-toto/
 │   ├── cat_toto_io.c
 │   ├── cat_toto_format.c
 │   └── cat_toto_cli.c
-└── tests/
-    ├── test_runner.c
-    ├── test_fmt_passthrough.c / .h
-    ├── test_fmt_show_ends.c / .h
-    ├── test_fmt_show_tabs.c / .h
-    ├── test_fmt_number_all.c / .h
-    ├── test_fmt_number_nonblank.c / .h
-    ├── test_fmt_squeeze_blank.c / .h
-    ├── test_fmt_show_nonprinting.c / .h
-    └── test_fmt_show_all.c / .h
+├── tests/
+│   ├── test_runner.c
+│   ├── test_fmt_passthrough.c / .h
+│   ├── test_fmt_show_ends.c / .h
+│   ├── test_fmt_show_tabs.c / .h
+│   ├── test_fmt_number_all.c / .h
+│   ├── test_fmt_number_nonblank.c / .h
+│   ├── test_fmt_squeeze_blank.c / .h
+│   ├── test_fmt_show_nonprinting.c / .h
+│   └── test_fmt_show_all.c / .h
+└── build/                   — scaffolding tracked; artefacts gitignored
+    ├── .gitkeep
+    ├── *.o                  — generated
+    ├── cat-toto             — generated
+    ├── cat-toto-debug       — generated
+    └── tests/
+        ├── .gitkeep
+        ├── *.o              — generated
+        └── test_core        — generated
 ```
 
-Build artefacts (`cat-toto`, `cat-toto.exe`, `tests/test_core`,
-`tests/test_core.exe`) are gitignored.
+Build artefacts under `build/` (including `cat-toto.exe` / `test_core.exe` on
+Windows) are gitignored. Directories stay in the repo via `build/.gitkeep` and
+`build/tests/.gitkeep`.
 
 ## Building on Linux
 
 ```sh
 make clean && make && make test
+./build/cat-toto --version
 ```
 
 ## Building on Windows (MSYS2 UCRT64)
@@ -113,10 +121,11 @@ make clean && make && make test
 pacman -S make mingw-w64-ucrt-x86_64-gcc   # once
 cd /path/to/cat-toto
 make clean && make && make test
+./build/cat-toto --version
 ```
 
-Produces a **native Windows executable** (`cat-toto` or `cat-toto.exe`).
-Runs in UCRT64, Git Bash, and CMD.
+Produces a **native Windows executable** (`build/cat-toto` or
+`build/cat-toto.exe`). Runs in UCRT64, Git Bash, and CMD.
 
 ### Git Bash caveat
 
@@ -133,11 +142,12 @@ PATH="/c/msys64/ucrt64/bin:$PATH" make
 - `cat_toto_format_chunk()` and `cat_toto_format_state_init()` are defined in
   `src/cat_toto_format.c` and linked into **both** the main binary and the test
   binary.
-- Tests link `src/cat_toto_format.c` **directly**; they do **not** link
-  `src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`, or
-  `src/cat_toto_emit.c`.
+- Tests link `build/cat_toto_format.o` (compiled from `src/cat_toto_format.c`);
+  they do **not** link `src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`,
+  or `src/cat_toto_emit.c`.
 - `main()` lives only in `src/main.c`.
+- Debug binary is linked in one step from sources with `CFLAGS_DEBUG` (does not
+  reuse release `.o` files).
 - `snprintf` is used inside `cat_toto_format.c` for line number formatting only;
   it is **not** used for I/O. All actual I/O goes through `read(2)` /
   `write(2)`.
-

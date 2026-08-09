@@ -8,8 +8,8 @@ alwaysApply: false
 
 ## Scope
 
-The Makefile `test` target builds and runs **`tests/test_core`**
-(or `tests/test_core.exe` on Windows).
+The Makefile `test` target builds and runs **`build/tests/test_core`**
+(or `build/tests/test_core.exe` on Windows).
 
 Tests cover **`cat_toto_format_chunk()`** only (the formatted output path).
 There are **no** subprocess or integration tests in-tree; file open/read I/O,
@@ -41,18 +41,22 @@ One scenario per `.c` / `.h` pair. Headers declare the test function for
 
 ## Build (from `Makefile`)
 
+Objects and the test binary live under `build/tests/`:
+
 ```makefile
-tests/test_core: $(TEST_SRCS) src/cat_toto_format.c $(HDRS) $(wildcard tests/*.h)
-	$(CC) $(CFLAGS) -o $@ $(TEST_SRCS) src/cat_toto_format.c
+TEST_CORE := build/tests/test_core
+# $(TEST_BUILD_DIR)/%.o ← tests/%.c
+# link $(TEST_CORE) from $(TEST_OBJS) + build/cat_toto_format.o
+test: $(TEST_CORE)
+	./$(TEST_CORE)
 ```
 
-Tests link **only** `src/cat_toto_format.c`. They do **not** link
-`src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`, or
-`src/cat_toto_emit.c`.
+Tests link **only** `build/cat_toto_format.o` (from `src/cat_toto_format.c`).
+They do **not** link `src/main.c`, `src/cat_toto_io.c`, `src/cat_toto_cli.c`,
+or `src/cat_toto_emit.c`.
 
 `cat_toto_format_chunk()` and `cat_toto_format_state_init()` are reached via
-`#include "cat_toto_format.h"` plus the direct link of
-`src/cat_toto_format.c`.
+`#include "cat_toto_format.h"` plus the format object.
 
 ## Required cases (behaviour)
 
@@ -92,7 +96,7 @@ Tests link **only** `src/cat_toto_format.c`. They do **not** link
 
 - Add `tests/test_fmt_<name>.c` + `.h`, declare the runner function in the
   `.h`, call it from `test_runner.c`, and append to `TEST_SRCS` in
-  `Makefile` (the `src/cat_toto_format.c` dependency is already present).
+  `Makefile` (the `build/cat_toto_format.o` dependency is already present).
 - Keep tests allocation-free; stack buffers only.
 - Always call `cat_toto_format_state_init()` to obtain a fresh `format_state_t`
   before each individual test case.
@@ -102,19 +106,18 @@ Tests link **only** `src/cat_toto_format.c`. They do **not** link
 After `make`:
 
 ```sh
-./cat-toto --version
-./cat-toto --help
-./cat-toto /etc/hostname                      # basic file output
-./cat-toto -n /etc/hostname                   # all lines numbered
-./cat-toto -b /etc/hostname                   # non-blank lines numbered
-./cat-toto -A /etc/hostname                   # show-all: ^I, $, M-X
-./cat-toto -s /etc/hostname                   # squeeze blank lines
-./cat-toto /etc/hostname /etc/hostname        # concatenation; continuous line numbers
-./cat-toto nonexistent.txt                    # expect exit 1, error on stderr
-./cat-toto nonexistent.txt /etc/hostname      # error then continues; exit 1
-./cat-toto - < /etc/hostname                  # explicit stdin operand
-echo "hello" | ./cat-toto                     # stdin via pipe
-./cat-toto /etc/hostname | head -n 1          # broken pipe → exit 0, no stderr
-# Interactive: ./cat-toto then Ctrl+C — expect exit 130
+./build/cat-toto --version
+./build/cat-toto --help
+./build/cat-toto /etc/hostname                      # basic file output
+./build/cat-toto -n /etc/hostname                   # all lines numbered
+./build/cat-toto -b /etc/hostname                   # non-blank lines numbered
+./build/cat-toto -A /etc/hostname                   # show-all: ^I, $, M-X
+./build/cat-toto -s /etc/hostname                   # squeeze blank lines
+./build/cat-toto /etc/hostname /etc/hostname        # concatenation; continuous line numbers
+./build/cat-toto nonexistent.txt                    # expect exit 1, error on stderr
+./build/cat-toto nonexistent.txt /etc/hostname      # error then continues; exit 1
+./build/cat-toto - < /etc/hostname                  # explicit stdin operand
+echo "hello" | ./build/cat-toto                     # stdin via pipe
+./build/cat-toto /etc/hostname | head -n 1          # broken pipe → exit 0, no stderr
+# Interactive: ./build/cat-toto then Ctrl+C — expect exit 130
 ```
-

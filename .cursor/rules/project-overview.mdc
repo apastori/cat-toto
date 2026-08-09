@@ -98,7 +98,8 @@ behaviour): the counter does not reset between files.
 ```
 include/   — cat_toto.h + cat_toto_{emit,format,cli}.h
 src/       — main.c + cat_toto_{emit,io,format,cli}.c
-tests/     — test_runner.c + test_fmt_*.c / .h → binary tests/test_core
+tests/     — test_runner.c + test_fmt_*.c / .h
+build/     — objects + binaries; dirs via .gitkeep, artefacts gitignored
 ```
 
 See `implementation.mdc`, `toolchain-structure.mdc`, and `testing.mdc` for
