@@ -23,3 +23,21 @@ libc only. No third-party libraries.
 Warnings
 --------
 All builds use `-Wall -Wextra -Wpedantic -Werror` (warnings are errors).
+
+Build layout (from Makefile)
+----------------------------
+Objects and binaries are written under build/:
+  build/.gitkeep         — keeps directory in git
+  build/*.o              — from src/*.c (gitignored)
+  build/cat-toto         — release binary (gitignored)
+  build/cat-toto-debug   — sanitizer/debug binary (gitignored)
+  build/tests/.gitkeep   — keeps tests subdirectory in git
+  build/tests/*.o        — from tests/*.c (gitignored)
+  build/tests/test_core  — unit-test binary (gitignored)
+
+make clean removes artefacts only; .gitkeep scaffolding remains.
+
+Debug / sanitizer build (make debug)
+------------------------------------
+Adds: -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
+Links build/cat-toto-debug in one step from sources (does not reuse release .o).
