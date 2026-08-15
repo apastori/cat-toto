@@ -8,12 +8,16 @@ order; line numbers (when requested) continue across files.
 ## Build
 
 ```sh
-make              # release binary: cat-toto
-make debug        # cat-toto-debug with sanitizers
-make test         # build and run format-engine unit tests
-make clean        # remove build artefacts
+make              # release binary: ./build/cat-toto
+make debug        # sanitizers + debug symbols → ./build/cat-toto-debug
+make test         # format-engine unit tests → ./build/tests/test_core
+make clean        # removes objects/binaries; keeps build/.gitkeep scaffolding
 make install      # install to /usr/local/bin (Linux/macOS)
 ```
+
+Object files and binaries are written under `build/` (tests under
+`build/tests/`). The directories are tracked via `.gitkeep`; artefacts are
+gitignored. Source under `src/` and `tests/` is unchanged.
 
 **Linux:**
 
@@ -31,19 +35,19 @@ cd /path/to/cat-toto
 make clean && make
 ```
 
-If using Git Bash:
+If using Git Bash, put `/c/msys64/ucrt64/bin` before Anaconda on `PATH`, or:
 
 ```sh
 PATH="/c/msys64/ucrt64/bin:$PATH" make
 ```
 
-The resulting native Windows executable runs in UCRT64, Git Bash, cmd, and
-PowerShell.
+The resulting native Windows executable (`build/cat-toto` or
+`build/cat-toto.exe`) runs in UCRT64, Git Bash, cmd, and PowerShell.
 
 ## Usage
 
 ```sh
-cat-toto [OPTION]... [FILE]...
+./build/cat-toto [OPTION]... [FILE]...
 ```
 
 With no `FILE`, or when `FILE` is `-`, read standard input. Multiple files are
@@ -100,7 +104,13 @@ cat-toto/
 │   ├── cat_toto_io.c
 │   ├── cat_toto_format.c
 │   └── cat_toto_cli.c
-└── tests/
-    ├── test_runner.c
-    └── test_fmt_*.c / .h  →  tests/test_core
+├── tests/
+│   ├── test_runner.c
+│   └── test_fmt_*.c / .h
+└── build/
+    ├── .gitkeep
+    ├── cat-toto            — generated
+    └── tests/
+        ├── .gitkeep
+        └── test_core       — generated
 ```
